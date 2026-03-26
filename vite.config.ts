@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate', // Automatically update the service worker
+      registerType: 'autoUpdate',        // Auto update service worker
       includeAssets: [
         'favicon.svg',
         'favicon.ico',
@@ -17,23 +17,24 @@ export default defineConfig({
         name: 'Premier Vault',
         short_name: 'Vault',
         description: 'Premier Vault – Your secure vault PWA',
-        theme_color: '#1e293b',          // Tailwind slate-800 color
-        background_color: '#ffffff',
-        display: 'standalone',           // Removes browser UI when installed
         start_url: '/',
+        display: 'standalone',
+        orientation: 'portrait',
+        background_color: '#ffffff',
+        theme_color: '#1e293b',
         icons: [
           {
-            src: '/pwa-192x192.png',
+            src: 'icons/icon-192x192.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '/pwa-512x512.png',
+            src: 'icons/icon-512x512.png',
             sizes: '512x512',
             type: 'image/png'
           },
           {
-            src: '/pwa-maskable-512x512.png',
+            src: 'icons/icon-maskable-512x512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable'
@@ -43,7 +44,7 @@ export default defineConfig({
     })
   ],
   server: {
-    port: 5173, // default Vite port
+    port: 5173,
     open: true
   }
 })
