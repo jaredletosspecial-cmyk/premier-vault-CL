@@ -1,31 +1,28 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
-    <title>Trevo-Premier EXECUTIVE</title>
-    <meta name="description" content="trevo-premier-vault | TREVO PREMIER LANCER EXCO-EXECUTIVE Portal Nemo-Stock·02 Released. Simulated simplicity in Stock Exchange and Trade">
-    <meta name="author" content="Lovable" />
-
-    <!-- TODO: Update og:title to match your application name -->
-    
-    
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/589ca033-4b7b-46c5-a1a4-4f7d956c0268/id-preview-eda08fae--de6a32b7-0156-436e-a4af-4c3859513826.lovable.app-1774422718446.png">
-
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/589ca033-4b7b-46c5-a1a4-4f7d956c0268/id-preview-eda08fae--de6a32b7-0156-436e-a4af-4c3859513826.lovable.app-1774422718446.png">
-    <meta property="og:title" content="Trevo-Premier EXECUTIVE">
-  <meta name="twitter:title" content="Trevo-Premier EXECUTIVE">
-  <meta property="og:description" content="trevo-premier-vault | TREVO PREMIER LANCER EXCO-EXECUTIVE Portal Nemo-Stock·02 Released. Simulated simplicity in Stock Exchange and Trade">
-  <meta name="twitter:description" content="trevo-premier-vault | TREVO PREMIER LANCER EXCO-EXECUTIVE Portal Nemo-Stock·02 Released. Simulated simplicity in Stock Exchange and Trade">
-  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#317EFB">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="manifest" href="/manifest.json">
+    <title>Your App Title</title>
 </head>
-
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<body>
+    <h1>Welcome to Your PWA</h1>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('ServiceWorker registration failed: ', error);
+                    });
+            });
+        }
+    </script>
+</body>
 </html>
