@@ -1,1 +1,28 @@
-{\n  "name": "Premier Vault",\n  "short_name": "Vault",\n  "description": "A secure vault for all your important documents.",\n  "start_url": "/index.html",\n  "display": "standalone",\n  "background_color": "#ffffff",\n  "theme_color": "#000000",\n  "icons": [\n    {\n      "src": "icons/icon-192x192.png",\n      "sizes": "192x192",\n      "type": "image/png"\n    },\n    {\n      "src": "icons/icon-512x512.png",\n      "sizes": "512x512",\n      "type": "image/png"\n    }\n  ]\n}
+{
+  "name": "Premier Vault",
+  "short_name": "Vault",
+  "description": "Premier Vault – Your secure vault for all important documents.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#1e293b",
+  "icons": [
+    {
+      "src": "icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
