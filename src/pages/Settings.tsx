@@ -29,9 +29,9 @@ export default function SettingsPage() {
     toast({ title: '✅ Password Updated' });
   };
 
-  const handleToggleSetting = async (key: keyof typeof profile) => {
-    const newVal = !(profile as any)[key];
-    await supabase.from('profiles').update({ [key]: newVal }).eq('id', user.id);
+  const handleToggleSetting = async (key: 'deposit_alerts' | 'withdrawal_alerts' | 'payout_alerts' | 'email_alerts' | 'two_factor_enabled') => {
+    const newVal = !profile[key];
+    await supabase.from('profiles').update({ [key]: newVal } as any).eq('id', user.id);
     await refreshProfile();
     toast({ title: 'Setting Updated' });
   };
