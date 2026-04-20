@@ -1,26 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { updateUser, generateCode, storeVerificationCode, getVerificationCode, clearVerificationCode, WithdrawalDetails } from '@/lib/storage';
 import { CreditCard, Bitcoin, Check, ArrowRight, Shield } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { createVerificationCode, verifyCode } from '@/lib/api';
 
 const banks = ['Chase Bank', 'Bank of America', 'Wells Fargo', 'Citibank', 'US Bank', 'Capital One', 'TD Bank', 'PNC Bank', 'Other'];
 const networks = ['ERC20', 'BEP20', 'TRC20'];
 const currencies = ['USDT', 'BTC', 'ETH'];
 
 export default function WithdrawalDetailsPage() {
-  const { user, refreshUser } = useAuth();
+  const { user, profile } = useAuth();
   const [step, setStep] = useState(1);
   const [method, setMethod] = useState<'bank' | 'crypto'>('bank');
+  const [existing, setExisting] = useState<any>(null);
+  const [updating, setUpdating] = useState(false);
 
-  // Bank fields
   const [bankName, setBankName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
   const [sortCode, setSortCode] = useState('');
 
-  // Crypto fields
   const [network, setNetwork] = useState('ERC20');
   const [walletAddress, setWalletAddress] = useState('');
   const [confirmWalletAddress, setConfirmWalletAddress] = useState('');
@@ -30,6 +31,14 @@ export default function WithdrawalDetailsPage() {
   const [error, setError] = useState('');
   const [timer, setTimer] = useState(60);
 
+  const loadExisting = async () => {
+    if (!user) return;
+    const { data } = await supabase.from('withdrawal_details').select('*').eq('user_id', user.id).maybeSingle();
+    setExisting(data);
+  };
+
+  useEffect(() => { loadExisting(); }, [user]);
+
   useEffect(() => {
     if (step === 2 && timer > 0) {
       const t = setTimeout(() => setTimer(timer - 1), 1000);
@@ -37,11 +46,10 @@ export default function WithdrawalDetailsPage() {
     }
   }, [step, timer]);
 
-  if (!user) return null;
+  if (!user || !profile) return null;
 
-  const existing = user.withdrawalDetails;
-  const cooldownActive = user.withdrawalDetailsUpdatedAt
-    ? Date.now() - new Date(user.withdrawalDetailsUpdatedAt).getTime() < 24 * 60 * 60 * 1000
+  const cooldownActive = existing?.updated_at
+    ? Date.now() - new Date(existing.updated_at).getTime() < 24 * 60 * 60 * 1000 && !updating
     : false;
 
   const validateStep1 = () => {
@@ -57,41 +65,43 @@ export default function WithdrawalDetailsPage() {
     return null;
   };
 
-  const handleProceedToVerify = () => {
+  const handleProceedToVerify = async () => {
     const err = validateStep1();
     if (err) { setError(err); return; }
     setError('');
-    const c = generateCode();
-    storeVerificationCode(user.email, c);
+    const c = await createVerificationCode(user.id, 'withdrawal_details');
     setTimer(60);
-    toast({ title: '📧 Verification Code Sent', description: `Code sent to ${user.email}: ${c}` });
+    toast({ title: '📧 Verification Code Sent', description: `Code sent to ${profile.email}: ${c}` });
     setStep(2);
   };
 
-  const handleVerify = () => {
-    const stored = getVerificationCode();
-    if (!stored || stored.code !== code) { setError('Invalid verification code.'); return; }
-    clearVerificationCode();
+  const handleVerify = async () => {
+    const ok = await verifyCode(user.id, code, 'withdrawal_details');
+    if (!ok) { setError('Invalid or expired verification code.'); return; }
 
-    const details: WithdrawalDetails = method === 'bank'
-      ? { method: 'bank', bankName, accountNumber, accountName, sortCode, registeredAt: new Date().toISOString() }
-      : { method: 'crypto', network, walletAddress, preferredCurrency, registeredAt: new Date().toISOString() };
+    const payload = method === 'bank'
+      ? { user_id: user.id, method: 'bank' as const, bank_name: bankName, account_number: accountNumber, account_name: accountName, sort_code: sortCode || null }
+      : { user_id: user.id, method: 'crypto' as const, network, wallet_address: walletAddress, preferred_currency: preferredCurrency };
 
-    updateUser(user.id, { withdrawalDetails: details, withdrawalDetailsUpdatedAt: new Date().toISOString() });
-    refreshUser();
+    if (existing) {
+      await supabase.from('withdrawal_details').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', existing.id);
+    } else {
+      await supabase.from('withdrawal_details').insert(payload);
+    }
+    await loadExisting();
+    setUpdating(false);
     setStep(3);
-    toast({ title: '✅ Withdrawal Details Saved', description: 'Your payment method has been registered successfully.' });
+    toast({ title: '✅ Withdrawal Details Saved' });
   };
 
-  const handleResend = () => {
-    const c = generateCode();
-    storeVerificationCode(user.email, c);
+  const handleResend = async () => {
+    const c = await createVerificationCode(user.id, 'withdrawal_details');
     setTimer(60);
-    toast({ title: '📧 Code Resent', description: `New code sent to ${user.email}: ${c}` });
+    toast({ title: '📧 Code Resent', description: `New code: ${c}` });
   };
 
-  // If already registered, show details
-  if (existing && step === 1 && !cooldownActive) {
+  // Already registered view
+  if (existing && !updating && step !== 3) {
     return (
       <div className="space-y-6 animate-fade-in">
         <h1 className="text-2xl lg:text-3xl font-display font-bold text-foreground">Withdrawal Details</h1>
@@ -103,7 +113,7 @@ export default function WithdrawalDetailsPage() {
             </div>
             <div>
               <h3 className="font-semibold text-foreground">Registered Payment Method</h3>
-              <p className="text-xs text-muted-foreground">Registered on {new Date(existing.registeredAt).toLocaleDateString()}</p>
+              <p className="text-xs text-muted-foreground">Updated on {new Date(existing.updated_at).toLocaleDateString()}</p>
             </div>
           </div>
 
@@ -111,36 +121,29 @@ export default function WithdrawalDetailsPage() {
             {existing.method === 'bank' ? (
               <>
                 <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="text-foreground">Bank Transfer</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Bank</span><span className="text-foreground">{existing.bankName}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Account</span><span className="text-foreground">****{existing.accountNumber?.slice(-4)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span className="text-foreground">{existing.accountName}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Bank</span><span className="text-foreground">{existing.bank_name}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Account</span><span className="text-foreground">****{existing.account_number?.slice(-4)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span className="text-foreground">{existing.account_name}</span></div>
               </>
             ) : (
               <>
                 <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="text-foreground">Cryptocurrency</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Network</span><span className="text-foreground">{existing.network}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Address</span><span className="text-foreground">{existing.walletAddress?.slice(0, 8)}...{existing.walletAddress?.slice(-6)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Currency</span><span className="text-foreground">{existing.preferredCurrency}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Address</span><span className="text-foreground">{existing.wallet_address?.slice(0, 8)}...{existing.wallet_address?.slice(-6)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Currency</span><span className="text-foreground">{existing.preferred_currency}</span></div>
               </>
             )}
           </div>
 
-          <button onClick={() => setStep(1)} className="btn-secondary mt-4 w-full sm:w-auto">
-            Update Details
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (cooldownActive && step === 1) {
-    return (
-      <div className="space-y-6 animate-fade-in">
-        <h1 className="text-2xl lg:text-3xl font-display font-bold text-foreground">Withdrawal Details</h1>
-        <div className="glass-card p-6 text-center">
-          <Shield className="w-12 h-12 text-warning mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-foreground mb-2">Cooldown Active</h3>
-          <p className="text-muted-foreground text-sm">Withdrawal details were recently updated. You can update again after 24 hours for security.</p>
+          {cooldownActive ? (
+            <div className="mt-4 flex items-center gap-2 text-warning text-sm">
+              <Shield className="w-4 h-4" /> Cooldown: can update again 24h after last change.
+            </div>
+          ) : (
+            <button onClick={() => { setUpdating(true); setStep(1); }} className="btn-secondary mt-4 w-full sm:w-auto">
+              Update Details
+            </button>
+          )}
         </div>
       </div>
     );
@@ -152,7 +155,6 @@ export default function WithdrawalDetailsPage() {
         {existing ? 'Update Withdrawal Details' : 'Register Withdrawal Details'}
       </h1>
 
-      {/* Progress */}
       <div className="flex items-center gap-2">
         {[1, 2, 3].map(s => (
           <React.Fragment key={s}>
@@ -210,7 +212,7 @@ export default function WithdrawalDetailsPage() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">Network</label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {networks.map(n => (
                     <button key={n} onClick={() => setNetwork(n)} className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${network === n ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>{n}</button>
                   ))}
@@ -226,7 +228,7 @@ export default function WithdrawalDetailsPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">Preferred Currency</label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {currencies.map(c => (
                     <button key={c} onClick={() => setPreferredCurrency(c)} className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${preferredCurrency === c ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>{c}</button>
                   ))}
@@ -263,7 +265,8 @@ export default function WithdrawalDetailsPage() {
             <Check className="w-8 h-8 text-success" />
           </div>
           <h3 className="text-xl font-display font-bold text-foreground">Details Registered!</h3>
-          <p className="text-muted-foreground text-sm">Your withdrawal details have been saved successfully.</p>
+          <p className="text-muted-foreground text-sm">Your withdrawal details have been saved.</p>
+          <button onClick={() => { setStep(1); setUpdating(false); }} className="btn-primary w-full">Done</button>
         </div>
       )}
     </div>

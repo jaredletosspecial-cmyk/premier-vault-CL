@@ -1,22 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { updateUser, addTransaction, getDailyTotal, generateCode, storeVerificationCode, getVerificationCode, clearVerificationCode } from '@/lib/storage';
-import { X, AlertTriangle } from 'lucide-react';
+import { X } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { generateRef, getDailyTotal, createVerificationCode, verifyCode } from '@/lib/api';
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
+interface Props { open: boolean; onClose: () => void; }
 
 export default function WithdrawalModal({ open, onClose }: Props) {
-  const { user, refreshUser } = useAuth();
+  const { user, profile } = useAuth();
   const [amount, setAmount] = useState('');
   const [step, setStep] = useState<'form' | 'verify' | 'success'>('form');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [timer, setTimer] = useState(60);
-  const [txRef, setTxRef] = useState('');
+  const [submittedRef, setSubmittedRef] = useState('');
+  const [details, setDetails] = useState<any>(null);
+  const [dailyTotal, setDailyTotal] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (open && user) {
+      supabase.from('withdrawal_details').select('*').eq('user_id', user.id).maybeSingle()
+        .then(({ data }) => setDetails(data));
+      getDailyTotal(user.id, 'Withdrawal').then(setDailyTotal);
+    }
+  }, [open, user]);
 
   useEffect(() => {
     if (step === 'verify' && timer > 0) {
@@ -25,61 +34,79 @@ export default function WithdrawalModal({ open, onClose }: Props) {
     }
   }, [step, timer]);
 
-  if (!open || !user || !user.withdrawalDetails) return null;
+  if (!open || !user || !profile || !details) return null;
 
   const numAmount = parseFloat(amount) || 0;
   const fee = numAmount * 0.02;
-  const totalDeduction = numAmount + fee;
-  const dailyTotal = getDailyTotal(user.id, 'Withdrawal');
+  const net = numAmount - fee;
 
-  const wd = user.withdrawalDetails;
-  const methodSummary = wd.method === 'bank'
-    ? `Bank: ${wd.bankName} · ****${wd.accountNumber?.slice(-4)}`
-    : `${wd.network} · ${wd.walletAddress?.slice(0, 8)}...${wd.walletAddress?.slice(-6)}`;
+  const methodSummary = details.method === 'bank'
+    ? `Bank: ${details.bank_name} · ****${details.account_number?.slice(-4)}`
+    : `${details.network} · ${details.wallet_address?.slice(0, 8)}...${details.wallet_address?.slice(-6)}`;
 
   const validate = () => {
     if (numAmount <= 0) return 'Enter a valid amount.';
     if (numAmount < 50) return 'Minimum withdrawal is $50.';
     if (numAmount > 10000) return 'Maximum withdrawal is $10,000 per transaction.';
-    if (totalDeduction > user.walletBalance) return 'Insufficient balance (including 2% fee).';
-    if (dailyTotal + numAmount > 20000) return `Daily withdrawal limit is $20,000. You've withdrawn $${dailyTotal.toLocaleString()} today.`;
+    if (numAmount > Number(profile.wallet_balance)) return 'Insufficient balance.';
+    if (dailyTotal + numAmount > 20000) return `Daily withdrawal limit is $20,000. You've requested $${dailyTotal.toLocaleString()} today.`;
     return null;
   };
 
-  const sendCode = () => {
-    const c = generateCode();
-    storeVerificationCode(user.email, c);
+  const sendCode = async () => {
+    const c = await createVerificationCode(user.id, 'withdrawal');
     setTimer(60);
-    toast({ title: '📧 Verification Code Sent', description: `Code sent to ${user.email}: ${c}` });
+    toast({ title: '📧 Verification Code Sent', description: `Code: ${c}` });
   };
 
-  const handleProceed = () => {
+  const handleProceed = async () => {
     const err = validate();
     if (err) { setError(err); return; }
     setError('');
-    sendCode();
+    await sendCode();
     setStep('verify');
   };
 
-  const handleVerify = () => {
-    const stored = getVerificationCode();
-    if (!stored || stored.code !== code) { setError('Invalid verification code.'); return; }
+  const handleVerify = async () => {
+    const ok = await verifyCode(user.id, code, 'withdrawal');
+    if (!ok) { setError('Invalid or expired verification code.'); return; }
 
-    clearVerificationCode();
-    const newBalance = user.walletBalance - totalDeduction;
-    updateUser(user.id, { walletBalance: newBalance });
-    const tx = addTransaction(user.id, { type: 'Withdrawal', amount: numAmount, status: 'Pending', description: `Withdrawal to ${wd.method === 'bank' ? wd.bankName : wd.network} (Fee: $${fee.toFixed(2)})` });
-    setTxRef(tx?.reference || '');
-    refreshUser();
+    setSubmitting(true);
+    const ref = generateRef();
+
+    // Deduct balance immediately (escrow); admin approval will finalize
+    const { error: balErr } = await supabase.from('profiles')
+      .update({ wallet_balance: Number(profile.wallet_balance) - numAmount })
+      .eq('id', user.id);
+    if (balErr) { toast({ title: 'Error', description: balErr.message, variant: 'destructive' }); setSubmitting(false); return; }
+
+    const { data: req, error: reqErr } = await supabase.from('withdrawal_requests').insert({
+      user_id: user.id, amount: numAmount, fee, net_amount: net,
+      withdrawal_details_snapshot: details, status: 'Pending',
+    }).select().single();
+
+    if (reqErr) {
+      // rollback
+      await supabase.from('profiles').update({ wallet_balance: Number(profile.wallet_balance) }).eq('id', user.id);
+      toast({ title: 'Error', description: reqErr.message, variant: 'destructive' });
+      setSubmitting(false);
+      return;
+    }
+
+    await supabase.from('transactions').insert({
+      user_id: user.id, type: 'Withdrawal', amount: numAmount, fee, status: 'Pending',
+      reference: ref, description: `Withdrawal to ${details.method === 'bank' ? details.bank_name : details.network} (Fee: $${fee.toFixed(2)})`,
+      related_request_id: req.id,
+    });
+
+    setSubmittedRef(ref);
     setStep('success');
-    toast({ title: '✅ Withdrawal Initiated', description: `$${numAmount.toLocaleString()} withdrawal is being processed.` });
+    setSubmitting(false);
+    toast({ title: '⏳ Withdrawal Submitted', description: 'Awaiting admin approval.' });
   };
 
   const handleClose = () => {
-    setStep('form');
-    setAmount('');
-    setCode('');
-    setError('');
+    setStep('form'); setAmount(''); setCode(''); setError('');
     onClose();
   };
 
@@ -88,7 +115,7 @@ export default function WithdrawalModal({ open, onClose }: Props) {
       <div className="glass-card p-6 w-full max-w-md animate-fade-in">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-display font-bold text-foreground">
-            {step === 'success' ? 'Withdrawal Initiated' : 'Withdraw Funds'}
+            {step === 'success' ? 'Withdrawal Submitted' : 'Withdraw Funds'}
           </h2>
           <button onClick={handleClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
         </div>
@@ -111,12 +138,11 @@ export default function WithdrawalModal({ open, onClose }: Props) {
                 <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="text-foreground">${numAmount.toLocaleString()}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Fee (2%)</span><span className="text-destructive">${fee.toFixed(2)}</span></div>
                 <div className="border-t border-border my-1" />
-                <div className="flex justify-between font-medium"><span className="text-foreground">Total Deduction</span><span className="text-foreground">${totalDeduction.toFixed(2)}</span></div>
+                <div className="flex justify-between font-medium"><span className="text-foreground">You'll receive</span><span className="text-foreground">${net.toFixed(2)}</span></div>
               </div>
             )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
-
             <button onClick={handleProceed} className="btn-primary w-full">Continue</button>
           </div>
         )}
@@ -132,20 +158,22 @@ export default function WithdrawalModal({ open, onClose }: Props) {
             </div>
             <div className="flex gap-3">
               <button onClick={() => { setStep('form'); setError(''); }} className="btn-secondary flex-1">Back</button>
-              <button onClick={handleVerify} disabled={code.length !== 6} className="btn-primary flex-1">Verify & Withdraw</button>
+              <button onClick={handleVerify} disabled={code.length !== 6 || submitting} className="btn-primary flex-1">
+                {submitting ? 'Processing...' : 'Verify & Submit'}
+              </button>
             </div>
           </div>
         )}
 
         {step === 'success' && (
           <div className="text-center space-y-4">
-            <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mx-auto">
-              <span className="text-3xl">✅</span>
+            <div className="w-16 h-16 rounded-full bg-warning/20 flex items-center justify-center mx-auto">
+              <span className="text-3xl">⏳</span>
             </div>
-            <p className="text-foreground font-semibold">Withdrawal Initiated!</p>
-            <p className="text-muted-foreground text-sm">Your withdrawal of ${numAmount.toLocaleString()} is being processed.</p>
-            <p className="text-xs text-muted-foreground">Estimated processing: 24-48 hours</p>
-            <p className="text-xs text-muted-foreground">Reference: {txRef}</p>
+            <p className="text-foreground font-semibold">Awaiting Approval</p>
+            <p className="text-muted-foreground text-sm">Your withdrawal of ${numAmount.toLocaleString()} is under review.</p>
+            <p className="text-xs text-muted-foreground">Estimated processing: 24-48 hours after approval</p>
+            <p className="text-xs text-muted-foreground">Reference: {submittedRef}</p>
             <button onClick={handleClose} className="btn-primary w-full">Done</button>
           </div>
         )}
