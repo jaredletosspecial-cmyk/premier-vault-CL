@@ -1,32 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { updateUser, addTransaction, getDailyTotal } from '@/lib/storage';
 import { X, CreditCard, Building2, Bitcoin } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { generateRef, getDailyTotal } from '@/lib/api';
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
+interface Props { open: boolean; onClose: () => void; }
 
 export default function DepositModal({ open, onClose }: Props) {
-  const { user, refreshUser } = useAuth();
+  const { user, profile } = useAuth();
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<'card' | 'bank' | 'crypto'>('card');
+  const [reference, setReference] = useState('');
   const [step, setStep] = useState<'form' | 'confirm' | 'success'>('form');
-  const [txRef, setTxRef] = useState('');
+  const [submittedRef, setSubmittedRef] = useState('');
   const [error, setError] = useState('');
+  const [dailyTotal, setDailyTotal] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
 
-  if (!open || !user) return null;
+  useEffect(() => {
+    if (open && user) getDailyTotal(user.id, 'Deposit').then(setDailyTotal);
+  }, [open, user]);
+
+  if (!open || !user || !profile) return null;
 
   const numAmount = parseFloat(amount) || 0;
-  const dailyTotal = getDailyTotal(user.id, 'Deposit');
 
   const validate = () => {
     if (numAmount <= 0) return 'Enter a valid amount.';
     if (numAmount < 100) return 'Minimum deposit is $100.';
     if (numAmount > 50000) return 'Maximum deposit is $50,000 per transaction.';
-    if (dailyTotal + numAmount > 50000) return `Daily deposit limit is $50,000. You've deposited $${dailyTotal.toLocaleString()} today.`;
+    if (dailyTotal + numAmount > 50000) return `Daily deposit limit is $50,000. You've requested $${dailyTotal.toLocaleString()} today.`;
     return null;
   };
 
@@ -37,20 +41,28 @@ export default function DepositModal({ open, onClose }: Props) {
     setStep('confirm');
   };
 
-  const handleConfirm = () => {
-    const newBalance = user.walletBalance + numAmount;
-    updateUser(user.id, { walletBalance: newBalance });
-    const tx = addTransaction(user.id, { type: 'Deposit', amount: numAmount, status: 'Completed', description: `Deposit via ${method}` });
-    setTxRef(tx?.reference || '');
-    refreshUser();
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    const ref = generateRef();
+    const { data: req, error: reqErr } = await supabase.from('deposit_requests').insert({
+      user_id: user.id, amount: numAmount, payment_method: method, payment_reference: reference || null, status: 'Pending',
+    }).select().single();
+
+    if (reqErr) { toast({ title: 'Error', description: reqErr.message, variant: 'destructive' }); setSubmitting(false); return; }
+
+    await supabase.from('transactions').insert({
+      user_id: user.id, type: 'Deposit', amount: numAmount, status: 'Pending',
+      reference: ref, description: `Deposit via ${method} (pending review)`, related_request_id: req.id,
+    });
+
+    setSubmittedRef(ref);
     setStep('success');
-    toast({ title: '✅ Deposit Successful', description: `$${numAmount.toLocaleString()} has been added to your wallet.` });
+    setSubmitting(false);
+    toast({ title: '⏳ Deposit Submitted', description: 'Your deposit is awaiting admin approval.' });
   };
 
   const handleClose = () => {
-    setStep('form');
-    setAmount('');
-    setError('');
+    setStep('form'); setAmount(''); setReference(''); setError('');
     onClose();
   };
 
@@ -59,7 +71,7 @@ export default function DepositModal({ open, onClose }: Props) {
       <div className="glass-card p-6 w-full max-w-md animate-fade-in">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-display font-bold text-foreground">
-            {step === 'success' ? 'Deposit Complete' : 'Deposit Funds'}
+            {step === 'success' ? 'Deposit Submitted' : 'Deposit Funds'}
           </h2>
           <button onClick={handleClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
         </div>
@@ -84,8 +96,12 @@ export default function DepositModal({ open, onClose }: Props) {
               </div>
             </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Payment Reference (optional)</label>
+              <input type="text" value={reference} onChange={e => setReference(e.target.value)} placeholder="Bank ref / Tx hash" className="input-dark w-full" />
+            </div>
 
+            {error && <p className="text-sm text-destructive">{error}</p>}
             <button onClick={handleProceed} className="btn-primary w-full">Continue</button>
           </div>
         )}
@@ -95,25 +111,26 @@ export default function DepositModal({ open, onClose }: Props) {
             <div className="bg-muted rounded-lg p-4 space-y-2">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Amount</span><span className="text-foreground font-medium">${numAmount.toLocaleString()}</span></div>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Method</span><span className="text-foreground font-medium capitalize">{method}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Fee</span><span className="text-success font-medium">$0.00</span></div>
-              <div className="border-t border-border my-2" />
-              <div className="flex justify-between"><span className="text-foreground font-medium">Total</span><span className="text-foreground font-bold">${numAmount.toLocaleString()}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Status</span><span className="text-warning">Pending review</span></div>
             </div>
+            <p className="text-xs text-muted-foreground">Your deposit will be credited after admin approval.</p>
             <div className="flex gap-3">
               <button onClick={() => setStep('form')} className="btn-secondary flex-1">Back</button>
-              <button onClick={handleConfirm} className="btn-primary flex-1">Confirm Deposit</button>
+              <button onClick={handleConfirm} disabled={submitting} className="btn-primary flex-1">
+                {submitting ? 'Submitting...' : 'Submit Deposit'}
+              </button>
             </div>
           </div>
         )}
 
         {step === 'success' && (
           <div className="text-center space-y-4">
-            <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mx-auto">
-              <span className="text-3xl">✅</span>
+            <div className="w-16 h-16 rounded-full bg-warning/20 flex items-center justify-center mx-auto">
+              <span className="text-3xl">⏳</span>
             </div>
-            <p className="text-foreground font-semibold">Deposit Successful!</p>
-            <p className="text-muted-foreground text-sm">${numAmount.toLocaleString()} has been added to your wallet.</p>
-            <p className="text-xs text-muted-foreground">Reference: {txRef}</p>
+            <p className="text-foreground font-semibold">Awaiting Approval</p>
+            <p className="text-muted-foreground text-sm">${numAmount.toLocaleString()} will be credited once an admin approves it.</p>
+            <p className="text-xs text-muted-foreground">Reference: {submittedRef}</p>
             <button onClick={handleClose} className="btn-primary w-full">Done</button>
           </div>
         )}

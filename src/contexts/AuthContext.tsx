@@ -1,140 +1,119 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import {
-  User, Session, getSession, setSession, clearSession, getUserById,
-  getUserByEmail, createUser, updateUser, updateSessionActivity,
-} from '@/lib/storage';
-import { toast } from '@/hooks/use-toast';
+import { Session, User } from '@supabase/supabase-js';
+import { supabase } from '@/integrations/supabase/client';
+
+export interface Profile {
+  id: string;
+  full_name: string;
+  email: string;
+  wallet_balance: number;
+  email_alerts: boolean;
+  deposit_alerts: boolean;
+  withdrawal_alerts: boolean;
+  payout_alerts: boolean;
+  two_factor_enabled: boolean;
+}
 
 interface AuthContextType {
   user: User | null;
+  session: Session | null;
+  profile: Profile | null;
+  isAdmin: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string, rememberMe: boolean) => { success: boolean; error?: string };
-  signup: (fullName: string, email: string, password: string) => { success: boolean; error?: string };
-  logout: () => void;
-  refreshUser: () => void;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (fullName: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshUser = useCallback(() => {
-    const session = getSession();
-    if (session) {
-      const u = getUserById(session.userId);
-      if (u) {
-        setUser(u);
-        updateSessionActivity();
-      } else {
-        clearSession();
-        setUser(null);
-      }
-    } else {
-      setUser(null);
-    }
+  const loadProfile = useCallback(async (userId: string) => {
+    const [{ data: prof }, { data: roles }] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      supabase.from('user_roles').select('role').eq('user_id', userId),
+    ]);
+    setProfile(prof as Profile | null);
+    setIsAdmin(!!roles?.some((r) => r.role === 'admin'));
   }, []);
 
+  const refreshProfile = useCallback(async () => {
+    if (user) await loadProfile(user.id);
+  }, [user, loadProfile]);
+
   useEffect(() => {
-    refreshUser();
-    setIsLoading(false);
-  }, [refreshUser]);
-
-  // Activity tracker for session timeout
-  useEffect(() => {
-    if (!user) return;
-    const handler = () => updateSessionActivity();
-    window.addEventListener('click', handler);
-    window.addEventListener('keydown', handler);
-    return () => {
-      window.removeEventListener('click', handler);
-      window.removeEventListener('keydown', handler);
-    };
-  }, [user]);
-
-  // Check session timeout periodically
-  useEffect(() => {
-    if (!user) return;
-    const interval = setInterval(() => {
-      const s = getSession();
-      if (!s) {
-        setUser(null);
-        toast({ title: 'Session expired', description: 'You have been logged out due to inactivity.', variant: 'destructive' });
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const login = (email: string, password: string, rememberMe: boolean) => {
-    const u = getUserByEmail(email);
-    if (!u) return { success: false, error: 'No account found with this email.' };
-
-    // Check lockout
-    if (u.lockedUntil) {
-      const lockEnd = new Date(u.lockedUntil).getTime();
-      if (Date.now() < lockEnd) {
-        const mins = Math.ceil((lockEnd - Date.now()) / 60000);
-        return { success: false, error: `Account locked. Try again in ${mins} minute(s).` };
+    // Set up listener FIRST
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess);
+      setUser(sess?.user ?? null);
+      if (sess?.user) {
+        // Defer to avoid deadlock
+        setTimeout(() => loadProfile(sess.user.id), 0);
       } else {
-        updateUser(u.id, { loginAttempts: 0, lockedUntil: null });
-        u.loginAttempts = 0;
-        u.lockedUntil = null;
+        setProfile(null);
+        setIsAdmin(false);
       }
-    }
+    });
 
-    if (u.password !== password) {
-      const attempts = (u.loginAttempts || 0) + 1;
-      const updates: Partial<User> = { loginAttempts: attempts };
-      if (attempts >= 5) {
-        updates.lockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-        updateUser(u.id, updates);
-        return { success: false, error: 'Too many failed attempts. Account locked for 15 minutes.' };
-      }
-      updateUser(u.id, updates);
-      return { success: false, error: `Invalid password. ${5 - attempts} attempts remaining.` };
-    }
+    // Then check existing session
+    supabase.auth.getSession().then(({ data: { session: sess } }) => {
+      setSession(sess);
+      setUser(sess?.user ?? null);
+      if (sess?.user) loadProfile(sess.user.id);
+      setIsLoading(false);
+    });
 
-    // Reset attempts on success
-    updateUser(u.id, { loginAttempts: 0, lockedUntil: null });
+    return () => sub.subscription.unsubscribe();
+  }, [loadProfile]);
 
-    const session: Session = {
-      userId: u.id,
-      email: u.email,
-      fullName: u.fullName,
-      rememberMe,
-      lastActivity: new Date().toISOString(),
-    };
-    setSession(session);
-    setUser(u);
+  const login = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { success: false, error: error.message };
     return { success: true };
   };
 
-  const signup = (fullName: string, email: string, password: string) => {
-    if (getUserByEmail(email)) {
-      return { success: false, error: 'An account with this email already exists.' };
-    }
-    const u = createUser(fullName, email, password);
-    const session: Session = {
-      userId: u.id,
-      email: u.email,
-      fullName: u.fullName,
-      rememberMe: false,
-      lastActivity: new Date().toISOString(),
-    };
-    setSession(session);
-    setUser(u);
+  const signup = async (fullName: string, email: string, password: string) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/`,
+        data: { full_name: fullName },
+      },
+    });
+    if (error) return { success: false, error: error.message };
     return { success: true };
   };
 
-  const logout = () => {
-    clearSession();
-    setUser(null);
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setProfile(null);
+    setIsAdmin(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, signup, logout, refreshUser }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        isAdmin,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        signup,
+        logout,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

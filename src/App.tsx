@@ -10,6 +10,7 @@ import Investments from "./pages/Investments";
 import WithdrawalDetails from "./pages/WithdrawalDetails";
 import Transactions from "./pages/Transactions";
 import SettingsPage from "./pages/Settings";
+import Admin from "./pages/Admin";
 import AppLayout from "./components/AppLayout";
 import NotFound from "./pages/NotFound";
 
@@ -44,6 +45,7 @@ const App = () => (
             <Route path="/withdrawal-details" element={<ProtectedRoute><WithdrawalDetails /></ProtectedRoute>} />
             <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

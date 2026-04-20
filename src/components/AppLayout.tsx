@@ -2,11 +2,10 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  LayoutDashboard, TrendingUp, CreditCard, ArrowDownToLine,
-  History, Settings, LogOut, Menu, X, Bell,
+  LayoutDashboard, TrendingUp, CreditCard, History, Settings, LogOut, Menu, Bell, ShieldCheck,
 } from 'lucide-react';
 
-const navItems = [
+const baseNavItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/investments', icon: TrendingUp, label: 'Investment Plans' },
   { to: '/withdrawal-details', icon: CreditCard, label: 'Withdrawal Details' },
@@ -15,21 +14,23 @@ const navItems = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, logout } = useAuth();
+  const { profile, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const handleLogout = () => {
-    logout();
+  const navItems = isAdmin
+    ? [...baseNavItems, { to: '/admin', icon: ShieldCheck, label: 'Admin Panel' }]
+    : baseNavItems;
+
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'linear-gradient(180deg, hsl(222 47% 6%), hsl(222 47% 4%))' }}>
-      {/* Mobile overlay */}
+    <div className="min-h-screen flex w-full" style={{ background: 'linear-gradient(180deg, hsl(222 47% 6%), hsl(222 47% 4%))' }}>
       {sidebarOpen && <div className="fixed inset-0 bg-background/80 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-sidebar border-r border-sidebar-border flex flex-col transform transition-transform duration-300 lg:relative lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 border-b border-sidebar-border">
           <div className="flex items-center gap-2">
@@ -65,9 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-h-screen">
-        {/* Header */}
         <header className="h-16 border-b border-border flex items-center justify-between px-4 lg:px-8 bg-card/30 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-muted-foreground hover:text-foreground">
@@ -75,19 +74,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </button>
             <div>
               <p className="text-sm text-muted-foreground">Welcome back,</p>
-              <p className="text-sm font-semibold text-foreground">{user?.fullName}</p>
+              <p className="text-sm font-semibold text-foreground">{profile?.full_name}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="hidden sm:block text-right">
               <p className="text-xs text-muted-foreground">Balance</p>
-              <p className="text-sm font-bold gradient-gold-text">${(user?.walletBalance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className="text-sm font-bold gradient-gold-text">${Number(profile?.wallet_balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
             </div>
             <button className="relative text-muted-foreground hover:text-foreground">
               <Bell className="w-5 h-5" />
             </button>
             <div className="w-8 h-8 rounded-full gradient-gold flex items-center justify-center text-primary-foreground font-bold text-sm">
-              {user?.fullName?.charAt(0).toUpperCase()}
+              {profile?.full_name?.charAt(0).toUpperCase()}
             </div>
           </div>
         </header>

@@ -7,21 +7,18 @@ export default function Login() {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!email || !password) { setError('All fields are required.'); return; }
     setLoading(true);
-    setTimeout(() => {
-      const result = login(email, password, rememberMe);
-      if (!result.success) setError(result.error || 'Login failed.');
-      setLoading(false);
-    }, 500);
+    const result = await login(email, password);
+    if (!result.success) setError(result.error || 'Login failed.');
+    setLoading(false);
   };
 
   return (
@@ -55,13 +52,6 @@ export default function Login() {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-              <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded border-border bg-muted accent-primary" />
-              Remember me
-            </label>
           </div>
 
           <button type="submit" disabled={loading} className="btn-primary w-full">

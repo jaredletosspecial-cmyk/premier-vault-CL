@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { History, Search, Download, ArrowUpRight, ArrowDownToLine, TrendingUp, DollarSign } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 const typeIcons: Record<string, React.ElementType> = {
   Deposit: ArrowUpRight,
@@ -13,19 +14,26 @@ export default function Transactions() {
   const { user } = useAuth();
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const [transactions, setTransactions] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+      .then(({ data }) => setTransactions(data || []));
+  }, [user]);
 
   if (!user) return null;
 
   const filters = ['All', 'Deposit', 'Withdrawal', 'Investment', 'ROI Payout'];
 
-  const filtered = user.transactions
+  const filtered = transactions
     .filter(t => filter === 'All' || t.type === filter)
-    .filter(t => !search || t.description.toLowerCase().includes(search.toLowerCase()) || t.reference.toLowerCase().includes(search.toLowerCase()));
+    .filter(t => !search || (t.description || '').toLowerCase().includes(search.toLowerCase()) || t.reference.toLowerCase().includes(search.toLowerCase()));
 
   const exportCSV = () => {
     const header = 'Date,Type,Amount,Status,Reference,Description\n';
     const rows = filtered.map(t =>
-      `${new Date(t.date).toLocaleDateString()},${t.type},${t.amount},${t.status},${t.reference},"${t.description}"`
+      `${new Date(t.created_at).toLocaleDateString()},${t.type},${t.amount},${t.status},${t.reference},"${t.description || ''}"`
     ).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -45,7 +53,6 @@ export default function Transactions() {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex gap-2 flex-wrap">
           {filters.map(f => (
@@ -60,7 +67,6 @@ export default function Transactions() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="glass-card overflow-hidden">
         {filtered.length === 0 ? (
           <div className="p-12 text-center">
@@ -84,9 +90,12 @@ export default function Transactions() {
                 {filtered.map(tx => {
                   const Icon = typeIcons[tx.type] || History;
                   const isCredit = tx.type === 'Deposit' || tx.type === 'ROI Payout';
+                  const badgeClass = tx.status === 'Completed' ? 'badge-completed'
+                    : tx.status === 'Pending' ? 'badge-pending'
+                    : 'stat-badge bg-destructive/20 text-destructive';
                   return (
                     <tr key={tx.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      <td className="py-3 px-4 text-muted-foreground">{new Date(tx.date).toLocaleDateString()}</td>
+                      <td className="py-3 px-4 text-muted-foreground">{new Date(tx.created_at).toLocaleDateString()}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
                           <Icon className="w-4 h-4 text-muted-foreground" />
@@ -95,13 +104,9 @@ export default function Transactions() {
                       </td>
                       <td className="py-3 px-4 text-muted-foreground max-w-[200px] truncate">{tx.description}</td>
                       <td className={`py-3 px-4 text-right font-medium ${isCredit ? 'text-success' : 'text-destructive'}`}>
-                        {isCredit ? '+' : '-'}${tx.amount.toLocaleString()}
+                        {isCredit ? '+' : '-'}${Number(tx.amount).toLocaleString()}
                       </td>
-                      <td className="py-3 px-4">
-                        <span className={tx.status === 'Completed' ? 'badge-completed' : tx.status === 'Pending' ? 'badge-pending' : 'stat-badge bg-destructive/20 text-destructive'}>
-                          {tx.status}
-                        </span>
-                      </td>
+                      <td className="py-3 px-4"><span className={badgeClass}>{tx.status}</span></td>
                       <td className="py-3 px-4 text-muted-foreground text-xs hidden sm:table-cell">{tx.reference}</td>
                     </tr>
                   );

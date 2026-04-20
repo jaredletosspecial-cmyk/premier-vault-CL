@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
+function getPasswordStrength(pw: string) {
   if (pw.length < 6) return { label: 'Too short', color: 'bg-destructive', width: 'w-1/5' };
   let score = 0;
   if (pw.length >= 8) score++;
@@ -27,7 +27,7 @@ export default function Signup() {
 
   const strength = getPasswordStrength(password);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!fullName || !email || !password || !confirmPassword) { setError('All fields are required.'); return; }
@@ -36,11 +36,9 @@ export default function Signup() {
     if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
 
     setLoading(true);
-    setTimeout(() => {
-      const result = signup(fullName, email, password);
-      if (!result.success) setError(result.error || 'Signup failed.');
-      setLoading(false);
-    }, 500);
+    const result = await signup(fullName, email, password);
+    if (!result.success) setError(result.error || 'Signup failed.');
+    setLoading(false);
   };
 
   return (

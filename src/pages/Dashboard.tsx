@@ -1,49 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import {
-  Wallet, ArrowUpRight, ArrowDownToLine, TrendingUp,
-  DollarSign, PieChart, Activity, Plus, Minus
-} from 'lucide-react';
+import { Wallet, ArrowDownToLine, TrendingUp, PieChart, Plus, Minus } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import DepositModal from '@/components/DepositModal';
 import WithdrawalModal from '@/components/WithdrawalModal';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function Dashboard() {
-  const { user, refreshUser } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [investments, setInvestments] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [hasWithdrawalDetails, setHasWithdrawalDetails] = useState(false);
 
-  if (!user) return null;
+  const loadData = async () => {
+    if (!user) return;
+    const [inv, tx, wd] = await Promise.all([
+      supabase.from('investments').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('transactions').select('*').eq('user_id', user.id),
+      supabase.from('withdrawal_details').select('id').eq('user_id', user.id).maybeSingle(),
+    ]);
+    setInvestments(inv.data || []);
+    setTransactions(tx.data || []);
+    setHasWithdrawalDetails(!!wd.data);
+  };
 
-  const activeInvestments = user.investments.filter(i => i.status === 'Active');
-  const totalReturns = user.investments.reduce((s, i) => s + i.weeklyReturn, 0);
-  const totalWithdrawn = user.transactions.filter(t => t.type === 'Withdrawal' && t.status !== 'Failed').reduce((s, t) => s + t.amount, 0);
+  useEffect(() => { loadData(); }, [user]);
 
-  // Portfolio chart data (last 6 months simulation)
+  if (!profile) return null;
+
+  const activeInvestments = investments.filter(i => i.status === 'Active');
+  const totalReturns = investments.reduce((s, i) => s + Number(i.weekly_return), 0);
+  const totalWithdrawn = transactions.filter(t => t.type === 'Withdrawal' && t.status !== 'Failed' && t.status !== 'Rejected').reduce((s, t) => s + Number(t.amount), 0);
+
   const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-  const chartData = months.map((m, i) => {
-    const deposited = user.transactions
-      .filter(t => t.type === 'Deposit' && t.status === 'Completed')
-      .reduce((s, t) => s + t.amount, 0);
-    const base = deposited * (0.3 + i * 0.14);
-    return { month: m, value: Math.round(base > 0 ? base : 0) };
-  });
+  const deposited = transactions.filter(t => t.type === 'Deposit' && t.status === 'Completed').reduce((s, t) => s + Number(t.amount), 0);
+  const chartData = months.map((m, i) => ({ month: m, value: Math.round(deposited * (0.3 + i * 0.14)) }));
 
-  const handleWithdraw = () => {
-    if (!user.withdrawalDetails) {
+  const handleWithdraw = async () => {
+    if (!hasWithdrawalDetails) {
       navigate('/withdrawal-details');
       return;
     }
     setWithdrawOpen(true);
   };
 
+  const onModalClose = async () => {
+    setDepositOpen(false);
+    setWithdrawOpen(false);
+    await refreshProfile();
+    await loadData();
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <h1 className="text-2xl lg:text-3xl font-display font-bold text-foreground">Dashboard</h1>
 
-      {/* Balance Card */}
       <div className="glass-card p-6 lg:p-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 rounded-full opacity-5 gradient-gold -translate-y-1/2 translate-x-1/2" />
         <div className="relative">
@@ -52,7 +67,7 @@ export default function Dashboard() {
             <span className="text-sm">Total Balance</span>
           </div>
           <p className="text-4xl lg:text-5xl font-display font-bold gradient-gold-text mb-6">
-            ${user.walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            ${Number(profile.wallet_balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
           <div className="flex flex-wrap gap-3">
             <button onClick={() => setDepositOpen(true)} className="btn-primary flex items-center gap-2">
@@ -65,7 +80,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="glass-card p-5">
           <div className="flex items-center justify-between mb-3">
@@ -98,7 +112,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Portfolio Chart */}
       <div className="glass-card p-6">
         <h3 className="text-lg font-display font-semibold text-foreground mb-4">Portfolio Growth</h3>
         <div className="h-64">
@@ -123,7 +136,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Active Investments */}
       {activeInvestments.length > 0 && (
         <div className="glass-card p-6">
           <h3 className="text-lg font-display font-semibold text-foreground mb-4">Active Investments</h3>
@@ -141,10 +153,10 @@ export default function Dashboard() {
               <tbody>
                 {activeInvestments.map(inv => (
                   <tr key={inv.id} className="border-b border-border/50">
-                    <td className="py-3 px-2 font-medium text-foreground">{inv.planName}</td>
-                    <td className="py-3 px-2 text-foreground">${inv.amount.toLocaleString()}</td>
-                    <td className="py-3 px-2 text-success">${inv.weeklyReturn.toFixed(2)}</td>
-                    <td className="py-3 px-2 text-muted-foreground hidden sm:table-cell">{new Date(inv.nextPayoutDate).toLocaleDateString()}</td>
+                    <td className="py-3 px-2 font-medium text-foreground">{inv.plan_name}</td>
+                    <td className="py-3 px-2 text-foreground">${Number(inv.amount).toLocaleString()}</td>
+                    <td className="py-3 px-2 text-success">${Number(inv.weekly_return).toFixed(2)}</td>
+                    <td className="py-3 px-2 text-muted-foreground hidden sm:table-cell">{new Date(inv.next_payout_date).toLocaleDateString()}</td>
                     <td className="py-3 px-2"><span className="badge-active">{inv.status}</span></td>
                   </tr>
                 ))}
@@ -154,8 +166,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      <DepositModal open={depositOpen} onClose={() => { setDepositOpen(false); refreshUser(); }} />
-      <WithdrawalModal open={withdrawOpen} onClose={() => { setWithdrawOpen(false); refreshUser(); }} />
+      <DepositModal open={depositOpen} onClose={onModalClose} />
+      <WithdrawalModal open={withdrawOpen} onClose={onModalClose} />
     </div>
   );
 }
