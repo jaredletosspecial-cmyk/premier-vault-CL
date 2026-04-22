@@ -7,83 +7,162 @@ workflows:
     environment:
       node: 22
       java: 21
+      npm: 10  # Specify npm version
+
+    cache:
+      cache_paths:
+        - node_modules
+        - ~/.gradle
 
     scripts:
-      - name: Verify Node and Java
+      - name: Setup Node and verify environment
         script: |
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
           node --version
           npm --version
           java -version
+          echo "Current directory: $(pwd)"
+          echo "Files: $(ls -la)"
 
       - name: Install dependencies
         script: |
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
-          node --version
-          npm --version
-          java -version
-          npm install
-
-      - name: Build web app
+          npm ci || npm install  # 'ci' is faster for CI/CD
+          
+      - name: Build web application
         script: |
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
-          node --version
-          npm --version
-          java -version
+          echo "📦 Building web application..."
           npm run build
-
-      - name: Add Android platform
-        script: |
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
-          node --version
-          npm --version
-          java -version
-          which node
-          npx cap --version
-          if [ ! -d "android" ]; then
-            npx cap add android
+          
+          # Verify build succeeded and find output directory
+          if [ -d "dist" ]; then
+            echo "✅ Build output found in 'dist'"
+            ls -la dist/
+          elif [ -d "build" ]; then
+            echo "✅ Build output found in 'build'"
+            ls -la build/
+          elif [ -d "www" ]; then
+            echo "✅ Build output found in 'www'"
+            ls -la www/
+          else
+            echo "❌ No build output found! Check your package.json build script"
+            exit 1
           fi
 
-      - name: Sync Capacitor
+      - name: Verify and fix Capacitor config
         script: |
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
-          node --version
-          npm --version
-          java -version
-          which node
-          npx cap --version
+          echo "🔧 Checking Capacitor configuration..."
+          
+          # Backup original config if needed
+          if [ -f "capacitor.config.ts" ]; then
+            cp capacitor.config.ts capacitor.config.ts.backup
+          fi
+          
+          # Ensure webDir is correct (should be 'dist' for most Lovable projects)
+          if grep -q "url:" capacitor.config.ts; then
+            echo "⚠️ WARNING: Server URL detected in config. This will cause issues!"
+            echo "Please remove the 'url' line from capacitor.config.ts for local builds"
+          fi
+          
+          # Show current config
+          cat capacitor.config.ts || cat capacitor.config.json
+
+      - name: Install Capacitor CLI
+        script: |
+          npm install @capacitor/cli @capacitor/android @capacitor/core
+          
+      - name: Setup Android platform
+        script: |
+          echo "📱 Setting up Android platform..."
+          
+          # Clean previous Android platform if exists
+          if [ -d "android" ]; then
+            echo "Removing existing Android platform..."
+            rm -rf android
+          fi
+          
+          # Add Android platform
+          npx cap add android
+          
+          if [ ! -d "android" ]; then
+            echo "❌ Failed to add Android platform"
+            exit 1
+          fi
+          
+          echo "✅ Android platform added"
+
+      - name: Sync Capacitor with local files
+        script: |
+          echo "🔄 Syncing Capacitor with local build files..."
+          
+          # Sync the project (copies dist files to android app)
           npx cap sync android
+          
+          # Verify files were copied
+          if [ -d "android/app/src/main/assets/public" ]; then
+            echo "✅ Assets synced to android/app/src/main/assets/public"
+            ls -la android/app/src/main/assets/public/
+          elif [ -d "android/app/build/intermediates/assets/debug" ]; then
+            echo "✅ Assets synced to build intermediates"
+          else
+            echo "⚠️ Checking alternative locations..."
+            find android -name "index.html" 2>/dev/null || echo "❌ No index.html found in android project"
+          fi
+          
+          # Copy files manually if sync didn't work (fallback)
+          if [ ! -f "android/app/src/main/assets/public/index.html" ] && [ -d "dist" ]; then
+            echo "Manual copy of assets..."
+            mkdir -p android/app/src/main/assets/public
+            cp -r dist/* android/app/src/main/assets/public/
+            echo "✅ Manual copy completed"
+          fi
+
+      - name: Update Android WebView settings (fix routing)
+        script: |
+          echo "🔧 Fixing Android WebView settings..."
+          
+          # Find the main activity file
+          MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.kt" -o -name "MainActivity.java" | head -1)
+          
+          if [ -n "$MAIN_ACTIVITY" ]; then
+            echo "Found MainActivity at: $MAIN_ACTIVITY"
+            
+            # For Kotlin files, add WebView debugging
+            if [[ "$MAIN_ACTIVITY" == *.kt ]]; then
+              if ! grep -q "setWebContentsDebuggingEnabled" "$MAIN_ACTIVITY"; then
+                echo "Adding WebView debugging to MainActivity.kt..."
+                sed -i '' 's/import android.os.Bundle/import android.os.Bundle\nimport android.webkit.WebView\nimport android.os.Build/' "$MAIN_ACTIVITY"
+                sed -i '' 's/init()/init()\n        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {\n            WebView.setWebContentsDebuggingEnabled(true)\n        }/' "$MAIN_ACTIVITY"
+              fi
+            fi
+          fi
 
       - name: Build APK
         script: |
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
-          node --version
-          npm --version
-          java -version
+          echo "🏗️ Building APK..."
           cd android
+          
+          # Make gradlew executable
           chmod +x gradlew
+          
+          # Clean build
+          ./gradlew clean
+          
+          # Build debug APK
           ./gradlew assembleDebug
+          
+          # Check if APK was created
+          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
+            APK_SIZE=$(ls -lh app/build/outputs/apk/debug/app-debug.apk | awk '{print $5}')
+            echo "✅ APK built successfully! Size: $APK_SIZE"
+            ls -la app/build/outputs/apk/debug/
+          else
+            echo "❌ APK build failed - checking for errors..."
+            find app/build -name "*.apk" 2>/dev/null || echo "No APK found"
+            exit 1
+          fi
 
     artifacts:
       - android/app/build/outputs/**/*.apk
+      - android/app/build/outputs/**/*.aab  # Also build AAB if needed
 
     publishing:
       email:
