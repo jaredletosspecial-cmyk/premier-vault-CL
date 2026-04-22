@@ -3,28 +3,88 @@ workflows:
     name: Android Capacitor Build
     max_build_duration: 60
     instance_type: mac_mini_m2
+
     environment:
-      node: 22          # ← Changed from 20 to 22
-      java: 17
+      node: 22
+      java: 21
+
     scripts:
+      - name: Verify Node and Java
+        script: |
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          node --version
+          npm --version
+          java -version
+
       - name: Install dependencies
-        script: npm install
+        script: |
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          node --version
+          npm --version
+          java -version
+          npm install
+
       - name: Build web app
-        script: npm run build
+        script: |
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          node --version
+          npm --version
+          java -version
+          npm run build
+
       - name: Add Android platform
         script: |
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          node --version
+          npm --version
+          java -version
+          which node
+          npx cap --version
           if [ ! -d "android" ]; then
             npx cap add android
           fi
+
       - name: Sync Capacitor
-        script: npx cap sync android
+        script: |
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          node --version
+          npm --version
+          java -version
+          which node
+          npx cap --version
+          npx cap sync android
+
       - name: Build APK
         script: |
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          node --version
+          npm --version
+          java -version
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
+
     artifacts:
       - android/app/build/outputs/**/*.apk
+
     publishing:
       email:
         recipients:
