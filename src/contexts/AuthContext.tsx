@@ -12,6 +12,9 @@ export interface Profile {
   withdrawal_alerts: boolean;
   payout_alerts: boolean;
   two_factor_enabled: boolean;
+  portal_username?: string;
+  legacy_data_uploaded?: boolean;
+  legacy_upload_date?: string;
 }
 
 interface AuthContextType {

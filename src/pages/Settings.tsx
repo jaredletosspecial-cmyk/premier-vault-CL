@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, Shield, Bell, Save } from 'lucide-react';
+import { User, Shield, Bell, Save, Upload } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import UploadLegacyDataModal from '@/components/UploadLegacyDataModal';
 
 export default function SettingsPage() {
   const { user, profile, refreshProfile } = useAuth();
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showLegacyUploadModal, setShowLegacyUploadModal] = useState(false);
 
   if (!user || !profile) return null;
 
@@ -96,6 +98,39 @@ export default function SettingsPage() {
           </div>
         ))}
       </div>
+
+      <div className="glass-card p-6 space-y-4">
+        <div className="flex items-center gap-3 mb-2">
+          <Upload className="w-5 h-5 text-primary" />
+          <h3 className="text-lg font-display font-semibold text-foreground">Legacy Data</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {profile?.legacy_data_uploaded
+            ? `✅ Legacy data imported on ${new Date(profile.legacy_upload_date!).toLocaleDateString()}`
+            : 'Restore your account data from the old Premier Portal system'}
+        </p>
+        <button
+          onClick={() => setShowLegacyUploadModal(true)}
+          disabled={profile?.legacy_data_uploaded}
+          className={`btn-primary flex items-center gap-2 text-sm w-full justify-center ${
+            profile?.legacy_data_uploaded ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+        >
+          <Upload className="w-4 h-4" />
+          {profile?.legacy_data_uploaded ? 'Data Already Uploaded' : 'Upload Old Logged Data From Previous Portal'}
+        </button>
+      </div>
+
+      <UploadLegacyDataModal
+        isOpen={showLegacyUploadModal}
+        onClose={() => setShowLegacyUploadModal(false)}
+        userId={user!.id}
+        userEmail={profile?.email || user?.email || ''}
+        onUploadSuccess={() => {
+          refreshProfile();
+          setShowLegacyUploadModal(false);
+        }}
+      />
     </div>
   );
 }
